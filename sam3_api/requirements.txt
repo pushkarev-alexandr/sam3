@@ -1,0 +1,13 @@
+# Install local SAM3 package from repository root.
+-e ..
+
+# API stack
+fastapi
+uvicorn[standard]
+python-multipart
+pydantic
+
+# Image/video processing
+opencv-python
+Pillow
+numpy
