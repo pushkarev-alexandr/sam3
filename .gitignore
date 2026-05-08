@@ -119,6 +119,7 @@ dmypy.json
 
 # VS Code
 .vscode/
+.cursor/
 *.code-workspace
 
 # Model weights and checkpoints
