@@ -26,7 +26,7 @@ from .config import (
     SESSION_TTL_SECONDS,
     TEMP_DIR_NAME,
 )
-from .image_utils import merge_output_masks, normalize_obj_ids
+from .image_utils import build_label_mask, normalize_obj_ids
 from .schemas import BBoxRequest
 
 
@@ -175,19 +175,22 @@ class Sam3Service:
                 }
             )
             outputs = response.get("outputs", {})
-            merged_mask = merge_output_masks(outputs.get("out_binary_masks"))
-            if merged_mask is None:
+            label_mask = build_label_mask(
+                outputs.get("out_binary_masks"),
+                outputs.get("out_obj_ids"),
+            )
+            if label_mask is None or not np.any(label_mask):
                 raise HTTPException(
                     status_code=500,
                     detail="Model did not return a mask for bbox prompt.",
                 )
-            session.masks_by_frame[bbox.frame_index] = merged_mask
+            session.masks_by_frame[bbox.frame_index] = label_mask
             session.touch()
             return {
                 "frame_index": bbox.frame_index,
                 "mask_ready": True,
-                "width": int(merged_mask.shape[1]),
-                "height": int(merged_mask.shape[0]),
+                "width": int(label_mask.shape[1]),
+                "height": int(label_mask.shape[0]),
                 "object_ids": normalize_obj_ids(outputs.get("out_obj_ids")),
             }
 
@@ -226,8 +229,10 @@ class Sam3Service:
                             frame_idx = response.get("frame_index")
                             if frame_idx is None:
                                 continue
-                            mask = merge_output_masks(
-                                response.get("outputs", {}).get("out_binary_masks")
+                            outputs = response.get("outputs", {})
+                            mask = build_label_mask(
+                                outputs.get("out_binary_masks"),
+                                outputs.get("out_obj_ids"),
                             )
                             with session.lock:
                                 if mask is not None:
