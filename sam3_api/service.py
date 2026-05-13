@@ -10,7 +10,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -43,6 +43,7 @@ class SessionState:
     frames_rgb: List[np.ndarray]
     first_prompt_frame_index: Optional[int] = None
     masks_by_frame: Dict[int, np.ndarray] = field(default_factory=dict)
+    object_boxes_by_frame: Dict[int, list[dict[str, object]]] = field(default_factory=dict)
     propagation_status: str = "idle"
     processed_frames: int = 0
     error: Optional[str] = None
@@ -185,6 +186,9 @@ class Sam3Service:
                     detail="Model did not return a mask for bbox prompt.",
                 )
             session.masks_by_frame[bbox.frame_index] = label_mask
+            session.object_boxes_by_frame[bbox.frame_index] = self._build_frame_object_boxes(
+                outputs=outputs,
+            )
             session.touch()
             return {
                 "frame_index": bbox.frame_index,
@@ -234,9 +238,13 @@ class Sam3Service:
                                 outputs.get("out_binary_masks"),
                                 outputs.get("out_obj_ids"),
                             )
+                            object_boxes = self._build_frame_object_boxes(
+                                outputs=outputs,
+                            )
                             with session.lock:
                                 if mask is not None:
                                     session.masks_by_frame[int(frame_idx)] = mask
+                                session.object_boxes_by_frame[int(frame_idx)] = object_boxes
                                 session.processed_frames = min(
                                     len(session.masks_by_frame), session.frame_count
                                 )
@@ -257,6 +265,44 @@ class Sam3Service:
                 session.propagation_status = "failed"
                 session.error = str(exc)
                 session.touch()
+
+    def build_object_boxes_export(self, session: SessionState) -> dict[str, object]:
+        with session.lock:
+            frames = [
+                {
+                    "frame_index": frame_index,
+                    "objects": session.object_boxes_by_frame.get(frame_index, []),
+                }
+                for frame_index in range(session.frame_count)
+            ]
+        return {
+            "version": 1,
+            "coordinate_space": "normalized_xywh",
+            "frames": frames,
+        }
+
+    @staticmethod
+    def _build_frame_object_boxes(*, outputs: dict[str, Any]) -> list[dict[str, object]]:
+        boxes = outputs.get("out_boxes_xywh")
+        if boxes is None:
+            return []
+        if hasattr(boxes, "cpu"):
+            boxes = boxes.cpu().numpy()
+        boxes_array = np.asarray(boxes, dtype=np.float32)
+        if boxes_array.ndim != 2 or boxes_array.shape[1] != 4:
+            return []
+
+        object_ids = normalize_obj_ids(outputs.get("out_obj_ids"))
+        frame_objects: list[dict[str, object]] = []
+        for idx, box in enumerate(boxes_array):
+            frame_objects.append(
+                {
+                    "label": idx + 1,
+                    "model_object_id": object_ids[idx] if idx < len(object_ids) else None,
+                    "box_xywh": [float(value) for value in box.tolist()],
+                }
+            )
+        return frame_objects
 
     @staticmethod
     def _extract_frames(

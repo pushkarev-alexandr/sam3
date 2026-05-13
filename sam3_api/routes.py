@@ -7,6 +7,7 @@ from .schemas import (
     AddBBoxResponse,
     BBoxRequest,
     CreateSessionResponse,
+    ObjectBoxesResponse,
     ProgressResponse,
     StatusResponse,
 )
@@ -59,6 +60,13 @@ async def get_mask(session_id: str, frame_index: int) -> Response:
     if mask is None:
         raise HTTPException(status_code=404, detail=f"Mask for frame {frame_index} not found.")
     return Response(content=mask_to_png(mask), media_type="image/png")
+
+
+@router.get("/sessions/{session_id}/object-boxes", response_model=ObjectBoxesResponse)
+async def get_object_boxes(session_id: str) -> ObjectBoxesResponse:
+    service = _get_service()
+    session = service.get_session(session_id)
+    return ObjectBoxesResponse(**service.build_object_boxes_export(session))
 
 
 @router.get("/sessions/{session_id}/frames/{frame_index}")
