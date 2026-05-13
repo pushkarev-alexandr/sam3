@@ -37,5 +37,22 @@ class AddBBoxResponse(BaseModel):
     object_ids: list[int]
 
 
+class ObjectBox(BaseModel):
+    label: int
+    model_object_id: int | None = None
+    box_xywh: list[float]
+
+
+class FrameObjectBoxes(BaseModel):
+    frame_index: int
+    objects: list[ObjectBox]
+
+
+class ObjectBoxesResponse(BaseModel):
+    version: int
+    coordinate_space: str
+    frames: list[FrameObjectBoxes]
+
+
 class StatusResponse(BaseModel):
     status: str
