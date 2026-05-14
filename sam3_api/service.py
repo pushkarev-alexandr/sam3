@@ -26,7 +26,7 @@ from .config import (
     SESSION_TTL_SECONDS,
     TEMP_DIR_NAME,
 )
-from .image_utils import build_label_mask, normalize_obj_ids
+from .image_utils import build_label_mask, filter_label_mask, normalize_obj_ids
 from .schemas import BBoxRequest
 
 
@@ -198,7 +198,11 @@ class Sam3Service:
                 "object_ids": normalize_obj_ids(outputs.get("out_obj_ids")),
             }
 
-    async def start_propagation(self, session: SessionState) -> None:
+    async def start_propagation(
+        self,
+        session: SessionState,
+        selected_labels: list[int] | None = None,
+    ) -> None:
         with session.lock:
             if session.first_prompt_frame_index is None:
                 raise HTTPException(
@@ -212,10 +216,15 @@ class Sam3Service:
             session.error = None
             session.touch()
             session.propagation_task = asyncio.create_task(
-                self._run_propagation(session), name=f"propagate-{session.backend_session_id}"
+                self._run_propagation(session, selected_labels=selected_labels),
+                name=f"propagate-{session.backend_session_id}",
             )
 
-    async def _run_propagation(self, session: SessionState) -> None:
+    async def _run_propagation(
+        self,
+        session: SessionState,
+        selected_labels: list[int] | None = None,
+    ) -> None:
         try:
             def _run_propagation_stream() -> None:
                 # to_thread runs in a different thread, so we must re-enter
@@ -238,6 +247,8 @@ class Sam3Service:
                                 outputs.get("out_binary_masks"),
                                 outputs.get("out_obj_ids"),
                             )
+                            if mask is not None and selected_labels:
+                                mask = filter_label_mask(mask, selected_labels)
                             object_boxes = self._build_frame_object_boxes(
                                 outputs=outputs,
                             )

@@ -9,6 +9,7 @@ from .schemas import (
     CreateSessionResponse,
     ObjectBoxesResponse,
     ProgressResponse,
+    PropagateRequest,
     StatusResponse,
 )
 from .service import Sam3Service
@@ -85,10 +86,13 @@ async def get_frame(session_id: str, frame_index: int, overlay: bool = False) ->
 
 
 @router.post("/sessions/{session_id}/propagate/start", response_model=StatusResponse)
-async def start_propagation(session_id: str) -> StatusResponse:
+async def start_propagation(
+    session_id: str,
+    body: PropagateRequest = PropagateRequest(),
+) -> StatusResponse:
     service = _get_service()
     session = service.get_session(session_id)
-    await service.start_propagation(session)
+    await service.start_propagation(session, selected_labels=body.selected_labels)
     return StatusResponse(status="started")
 
 

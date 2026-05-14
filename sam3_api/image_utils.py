@@ -81,6 +81,17 @@ def build_label_mask(raw_masks: object, _obj_ids: object) -> Optional[np.ndarray
     return np.minimum(labels, 255).astype(np.uint8)
 
 
+def filter_label_mask(label_mask: np.ndarray, selected_labels: list[int]) -> np.ndarray:
+    if not selected_labels:
+        return label_mask
+    keep = np.zeros_like(label_mask, dtype=bool)
+    for lab in selected_labels:
+        keep |= label_mask == lab
+    result = label_mask.copy()
+    result[~keep] = 0
+    return result
+
+
 def color_for_object_id(object_id: int) -> np.ndarray:
     if object_id <= 0:
         return np.array([0, 0, 0], dtype=np.uint8)

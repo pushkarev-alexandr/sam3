@@ -54,5 +54,9 @@ class ObjectBoxesResponse(BaseModel):
     frames: list[FrameObjectBoxes]
 
 
+class PropagateRequest(BaseModel):
+    selected_labels: list[int] | None = None
+
+
 class StatusResponse(BaseModel):
     status: str
