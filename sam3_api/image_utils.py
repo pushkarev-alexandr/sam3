@@ -92,6 +92,16 @@ def filter_label_mask(label_mask: np.ndarray, selected_labels: list[int]) -> np.
     return result
 
 
+def filter_object_boxes(
+    objects: list[dict[str, object]],
+    selected_labels: list[int],
+) -> list[dict[str, object]]:
+    if not selected_labels:
+        return objects
+    keep = set(selected_labels)
+    return [obj for obj in objects if int(obj.get("label", 0)) in keep]
+
+
 def color_for_object_id(object_id: int) -> np.ndarray:
     if object_id <= 0:
         return np.array([0, 0, 0], dtype=np.uint8)

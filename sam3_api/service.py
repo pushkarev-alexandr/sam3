@@ -26,7 +26,7 @@ from .config import (
     SESSION_TTL_SECONDS,
     TEMP_DIR_NAME,
 )
-from .image_utils import build_label_mask, filter_label_mask, normalize_obj_ids
+from .image_utils import build_label_mask, filter_label_mask, filter_object_boxes, normalize_obj_ids
 from .schemas import BBoxRequest
 
 
@@ -249,9 +249,9 @@ class Sam3Service:
                             )
                             if mask is not None and selected_labels:
                                 mask = filter_label_mask(mask, selected_labels)
-                            object_boxes = self._build_frame_object_boxes(
-                                outputs=outputs,
-                            )
+                            object_boxes = self._build_frame_object_boxes(outputs=outputs)
+                            if selected_labels:
+                                object_boxes = filter_object_boxes(object_boxes, selected_labels)
                             with session.lock:
                                 if mask is not None:
                                     session.masks_by_frame[int(frame_idx)] = mask
