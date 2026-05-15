@@ -81,6 +81,26 @@ def build_label_mask(raw_masks: object, _obj_ids: object) -> Optional[np.ndarray
     return np.minimum(labels, 255).astype(np.uint8)
 
 
+def build_mask_for_model_ids(
+    raw_masks: object,
+    obj_ids: object,
+    selected_model_ids: list[int],
+) -> np.ndarray:
+    """Union of instance masks for stable SAM3 ``model_object_id`` values (0/1 output)."""
+    masks = _normalize_output_masks(raw_masks)
+    if masks is None:
+        return np.zeros((0, 0), dtype=np.uint8)
+    ids = normalize_obj_ids(obj_ids)
+    selected = set(selected_model_ids)
+    if not selected:
+        return np.zeros(masks.shape[1:], dtype=np.uint8)
+    merged = np.zeros(masks.shape[1:], dtype=bool)
+    for i, oid in enumerate(ids):
+        if i < masks.shape[0] and oid in selected:
+            merged |= masks[i]
+    return merged.astype(np.uint8)
+
+
 def filter_label_mask(label_mask: np.ndarray, selected_labels: list[int]) -> np.ndarray:
     if not selected_labels:
         return label_mask
@@ -100,6 +120,16 @@ def filter_object_boxes(
         return objects
     keep = set(selected_labels)
     return [obj for obj in objects if int(obj.get("label", 0)) in keep]
+
+
+def filter_object_boxes_by_model_ids(
+    objects: list[dict[str, object]],
+    selected_model_ids: list[int],
+) -> list[dict[str, object]]:
+    if not selected_model_ids:
+        return objects
+    keep = set(selected_model_ids)
+    return [obj for obj in objects if int(obj.get("model_object_id", -1)) in keep]
 
 
 def color_for_object_id(object_id: int) -> np.ndarray:

@@ -19,8 +19,30 @@ sys.modules["sam3_api.image_utils"] = image_utils
 spec.loader.exec_module(image_utils)
 
 build_label_mask = image_utils.build_label_mask
+build_mask_for_model_ids = image_utils.build_mask_for_model_ids
 mask_to_png = image_utils.mask_to_png
 overlay_frame = image_utils.overlay_frame
+
+
+def test_build_mask_for_model_ids_keeps_only_selected_track() -> None:
+    masks = np.array(
+        [
+            [[True, False], [False, False]],
+            [[False, True], [True, True]],
+        ]
+    )
+
+    mask = build_mask_for_model_ids(masks, [0, 1], [0])
+
+    assert mask.tolist() == [[1, 0], [0, 0]]
+
+
+def test_build_mask_for_model_ids_empty_when_track_absent() -> None:
+    masks = np.array([[[False, True], [True, True]]])
+
+    mask = build_mask_for_model_ids(masks, [1], [0])
+
+    assert mask.tolist() == [[0, 0], [0, 0]]
 
 
 def test_build_label_mask_uses_mask_index_and_max_index_on_overlap() -> None:

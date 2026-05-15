@@ -22,7 +22,7 @@ for module_name in ["image_utils", "schemas", "service"]:
     sys.modules[f"sam3_api.{module_name}"] = module
     spec.loader.exec_module(module)
 
-from sam3_api.image_utils import filter_object_boxes  # noqa: E402
+from sam3_api.image_utils import filter_object_boxes, filter_object_boxes_by_model_ids  # noqa: E402
 from sam3_api.service import Sam3Service  # noqa: E402
 
 
@@ -48,6 +48,15 @@ class Sam3ObjectBoxesTest(unittest.TestCase):
         ]
         filtered = filter_object_boxes(objects, [1, 3])
         self.assertEqual([item["label"] for item in filtered], [1, 3])
+
+    def test_filter_object_boxes_by_model_ids(self) -> None:
+        objects = [
+            {"label": 1, "model_object_id": 0, "box_xywh": [0.1, 0.2, 0.3, 0.4]},
+            {"label": 1, "model_object_id": 1, "box_xywh": [0.5, 0.6, 0.1, 0.2]},
+        ]
+        filtered = filter_object_boxes_by_model_ids(objects, [0])
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0]["model_object_id"], 0)
 
 
 if __name__ == "__main__":

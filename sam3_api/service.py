@@ -26,7 +26,12 @@ from .config import (
     SESSION_TTL_SECONDS,
     TEMP_DIR_NAME,
 )
-from .image_utils import build_label_mask, filter_label_mask, filter_object_boxes, normalize_obj_ids
+from .image_utils import (
+    build_label_mask,
+    build_mask_for_model_ids,
+    filter_object_boxes_by_model_ids,
+    normalize_obj_ids,
+)
 from .schemas import BBoxRequest
 
 
@@ -42,6 +47,7 @@ class SessionState:
     height: int
     frames_rgb: List[np.ndarray]
     first_prompt_frame_index: Optional[int] = None
+    prompt_label_to_model_id: Dict[int, int] = field(default_factory=dict)
     masks_by_frame: Dict[int, np.ndarray] = field(default_factory=dict)
     object_boxes_by_frame: Dict[int, list[dict[str, object]]] = field(default_factory=dict)
     propagation_status: str = "idle"
@@ -186,9 +192,13 @@ class Sam3Service:
                     detail="Model did not return a mask for bbox prompt.",
                 )
             session.masks_by_frame[bbox.frame_index] = label_mask
-            session.object_boxes_by_frame[bbox.frame_index] = self._build_frame_object_boxes(
-                outputs=outputs,
-            )
+            prompt_boxes = self._build_frame_object_boxes(outputs=outputs)
+            session.object_boxes_by_frame[bbox.frame_index] = prompt_boxes
+            session.prompt_label_to_model_id = {
+                int(obj["label"]): int(obj["model_object_id"])
+                for obj in prompt_boxes
+                if obj.get("model_object_id") is not None
+            }
             session.touch()
             return {
                 "frame_index": bbox.frame_index,
@@ -225,6 +235,13 @@ class Sam3Service:
         session: SessionState,
         selected_labels: list[int] | None = None,
     ) -> None:
+        selected_model_ids: list[int] | None = None
+        if selected_labels:
+            selected_model_ids = [
+                session.prompt_label_to_model_id[lab]
+                for lab in selected_labels
+                if lab in session.prompt_label_to_model_id
+            ]
         try:
             def _run_propagation_stream() -> None:
                 # to_thread runs in a different thread, so we must re-enter
@@ -243,15 +260,22 @@ class Sam3Service:
                             if frame_idx is None:
                                 continue
                             outputs = response.get("outputs", {})
-                            mask = build_label_mask(
-                                outputs.get("out_binary_masks"),
-                                outputs.get("out_obj_ids"),
-                            )
-                            if mask is not None and selected_labels:
-                                mask = filter_label_mask(mask, selected_labels)
+                            if selected_model_ids is not None:
+                                mask = build_mask_for_model_ids(
+                                    outputs.get("out_binary_masks"),
+                                    outputs.get("out_obj_ids"),
+                                    selected_model_ids,
+                                )
+                            else:
+                                mask = build_label_mask(
+                                    outputs.get("out_binary_masks"),
+                                    outputs.get("out_obj_ids"),
+                                )
                             object_boxes = self._build_frame_object_boxes(outputs=outputs)
-                            if selected_labels:
-                                object_boxes = filter_object_boxes(object_boxes, selected_labels)
+                            if selected_model_ids is not None:
+                                object_boxes = filter_object_boxes_by_model_ids(
+                                    object_boxes, selected_model_ids
+                                )
                             with session.lock:
                                 if mask is not None:
                                     session.masks_by_frame[int(frame_idx)] = mask
