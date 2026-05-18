@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -9,6 +9,8 @@ class BBoxRequest(BaseModel):
     y: float = Field(ge=0)
     width: float = Field(gt=0)
     height: float = Field(gt=0)
+    polarity: Literal["positive", "negative"] = "positive"
+    mode: Literal["replace_last", "append"] = "replace_last"
 
 
 class ProgressResponse(BaseModel):
@@ -35,6 +37,16 @@ class AddBBoxResponse(BaseModel):
     width: int
     height: int
     object_ids: list[int]
+    prompt_boxes: list["PromptBox"]
+
+
+class PromptBox(BaseModel):
+    frame_index: int
+    x: float
+    y: float
+    width: float
+    height: float
+    polarity: Literal["positive", "negative"]
 
 
 class ObjectBox(BaseModel):

@@ -192,12 +192,12 @@ class Sam3VideoInference(Sam3VideoBase):
             and inference_state["previous_stages_out"][frame_idx] is None
         )
         if is_new_visual_prompt:
-            if boxes_cxcywh.size(0) != 1:
+            if boxes_cxcywh.size(0) < 1:
                 raise RuntimeError(
-                    "visual prompts (box as an initial prompt) should only have one box, "
+                    "visual prompts require at least one box, "
                     f"but got {boxes_cxcywh.shape=}"
                 )
-            if not box_labels.item():
+            if not box_labels[0].item():
                 logging.warning("A negative box is added as a visual prompt.")
             # take the first box prompt as a visual prompt
             device = self.device
@@ -897,6 +897,25 @@ class Sam3VideoInference(Sam3VideoBase):
             boxes_cxcywh, box_labels, geometric_prompt = self._get_visual_prompt(
                 inference_state, frame_idx, boxes_cxcywh, box_labels
             )
+
+            # Remaining boxes (after the visual anchor) must be merged into the geometric
+            # prompt; otherwise only the first bbox affects detection.
+            if boxes_cxcywh.numel() > 0:
+                batch_size = 1
+                device = self.device
+                if geometric_prompt is None:
+                    geometric_prompt = Prompt(
+                        box_embeddings=torch.zeros(0, batch_size, 4, device=device),
+                        box_mask=torch.zeros(batch_size, 0, device=device, dtype=torch.bool),
+                        box_labels=torch.zeros(0, batch_size, device=device, dtype=torch.long),
+                        point_embeddings=torch.zeros(0, batch_size, 2, device=device),
+                        point_mask=torch.zeros(batch_size, 0, device=device, dtype=torch.bool),
+                        point_labels=torch.zeros(0, batch_size, device=device, dtype=torch.long),
+                    )
+                geometric_prompt.append_boxes(
+                    boxes=boxes_cxcywh.view(-1, batch_size, 4).to(device),
+                    labels=box_labels.view(-1, batch_size).to(device),
+                )
 
             inference_state["per_frame_geometric_prompt"][frame_idx] = geometric_prompt
 

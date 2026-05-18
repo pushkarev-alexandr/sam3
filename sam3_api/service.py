@@ -10,7 +10,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -36,6 +36,16 @@ from .schemas import BBoxRequest
 
 
 @dataclass
+class PromptBoxState:
+    frame_index: int
+    x: float
+    y: float
+    width: float
+    height: float
+    polarity: Literal["positive", "negative"]
+
+
+@dataclass
 class SessionState:
     backend_session_id: str
     predictor_session_id: str
@@ -47,6 +57,7 @@ class SessionState:
     height: int
     frames_rgb: List[np.ndarray]
     first_prompt_frame_index: Optional[int] = None
+    prompt_boxes: list[PromptBoxState] = field(default_factory=list)
     prompt_label_to_model_id: Dict[int, int] = field(default_factory=dict)
     masks_by_frame: Dict[int, np.ndarray] = field(default_factory=dict)
     object_boxes_by_frame: Dict[int, list[dict[str, object]]] = field(default_factory=dict)
@@ -161,24 +172,55 @@ class Sam3Service:
                     status_code=400,
                     detail=f"frame_index={bbox.frame_index} is out of range [0, {session.frame_count - 1}]",
                 )
-            session.first_prompt_frame_index = bbox.frame_index
-            box_xywh = self._normalize_bbox_xywh(
-                x=bbox.x,
-                y=bbox.y,
-                width=bbox.width,
-                height=bbox.height,
-                frame_width=session.width,
-                frame_height=session.height,
+            if session.first_prompt_frame_index is None:
+                session.first_prompt_frame_index = bbox.frame_index
+            elif session.first_prompt_frame_index != bbox.frame_index:
+                session.first_prompt_frame_index = bbox.frame_index
+                session.prompt_boxes = []
+                session.prompt_label_to_model_id = {}
+
+            next_prompt_boxes = self._build_prompt_boxes(
+                current=session.prompt_boxes,
+                incoming=PromptBoxState(
+                    frame_index=bbox.frame_index,
+                    x=bbox.x,
+                    y=bbox.y,
+                    width=bbox.width,
+                    height=bbox.height,
+                    polarity=bbox.polarity,
+                ),
+                mode=bbox.mode,
             )
+            if not any(prompt_box.polarity == "positive" for prompt_box in next_prompt_boxes):
+                raise HTTPException(
+                    status_code=400,
+                    detail="At least one positive bbox is required before adding negative prompts.",
+                )
+
+            positive_boxes = [box for box in next_prompt_boxes if box.polarity == "positive"]
+            negative_boxes = [box for box in next_prompt_boxes if box.polarity == "negative"]
+            ordered_boxes = positive_boxes + negative_boxes
+
+            normalized_boxes = [
+                self._normalize_bbox_xywh(
+                    x=box.x,
+                    y=box.y,
+                    width=box.width,
+                    height=box.height,
+                    frame_width=session.width,
+                    frame_height=session.height,
+                )
+                for box in ordered_boxes
+            ]
+            normalized_labels = [1 if box.polarity == "positive" else 0 for box in ordered_boxes]
             response = self.predictor.handle_request(
                 {
                     "type": "add_prompt",
                     "session_id": session.predictor_session_id,
-                    "frame_index": bbox.frame_index,
-                    "bounding_boxes": [box_xywh],
-                    "bounding_box_labels": [1],
+                    "frame_index": session.first_prompt_frame_index,
+                    "bounding_boxes": normalized_boxes,
+                    "bounding_box_labels": normalized_labels,
                     "rel_coordinates": True,
-                    "clear_old_boxes": True,
                 }
             )
             outputs = response.get("outputs", {})
@@ -191,9 +233,10 @@ class Sam3Service:
                     status_code=500,
                     detail="Model did not return a mask for bbox prompt.",
                 )
-            session.masks_by_frame[bbox.frame_index] = label_mask
+            session.prompt_boxes = ordered_boxes
+            session.masks_by_frame[session.first_prompt_frame_index] = label_mask
             prompt_boxes = self._build_frame_object_boxes(outputs=outputs)
-            session.object_boxes_by_frame[bbox.frame_index] = prompt_boxes
+            session.object_boxes_by_frame[session.first_prompt_frame_index] = prompt_boxes
             session.prompt_label_to_model_id = {
                 int(obj["label"]): int(obj["model_object_id"])
                 for obj in prompt_boxes
@@ -201,11 +244,12 @@ class Sam3Service:
             }
             session.touch()
             return {
-                "frame_index": bbox.frame_index,
+                "frame_index": session.first_prompt_frame_index,
                 "mask_ready": True,
                 "width": int(label_mask.shape[1]),
                 "height": int(label_mask.shape[0]),
                 "object_ids": normalize_obj_ids(outputs.get("out_obj_ids")),
+                "prompt_boxes": [self._prompt_box_to_payload(box) for box in session.prompt_boxes],
             }
 
     async def start_propagation(
@@ -398,3 +442,33 @@ class Sam3Service:
         if w <= 0.0 or h <= 0.0:
             raise HTTPException(status_code=400, detail="BBox is outside frame bounds.")
         return [x0, y0, w, h]
+
+    @staticmethod
+    def _build_prompt_boxes(
+        *,
+        current: list[PromptBoxState],
+        incoming: PromptBoxState,
+        mode: Literal["replace_last", "append"],
+    ) -> list[PromptBoxState]:
+        next_boxes = list(current)
+        if mode == "append":
+            next_boxes.append(incoming)
+            return next_boxes
+
+        for idx in range(len(next_boxes) - 1, -1, -1):
+            if next_boxes[idx].polarity == incoming.polarity:
+                next_boxes[idx] = incoming
+                return next_boxes
+        next_boxes.append(incoming)
+        return next_boxes
+
+    @staticmethod
+    def _prompt_box_to_payload(prompt_box: PromptBoxState) -> dict[str, object]:
+        return {
+            "frame_index": prompt_box.frame_index,
+            "x": float(prompt_box.x),
+            "y": float(prompt_box.y),
+            "width": float(prompt_box.width),
+            "height": float(prompt_box.height),
+            "polarity": prompt_box.polarity,
+        }
