@@ -287,20 +287,21 @@ class Sam3BasePredictor:
                 if k in sig.parameters:
                     propagate_kwargs[k] = v
 
-            # Forward propagation
-            if propagation_direction in ["both", "forward"]:
-                for frame_idx, outputs in self.model.propagate_in_video(
-                    **propagate_kwargs,
-                    reverse=False,
-                ):
-                    yield {"frame_index": frame_idx, "outputs": outputs}
-            # Backward propagation
-            if propagation_direction in ["both", "backward"]:
-                for frame_idx, outputs in self.model.propagate_in_video(
-                    **propagate_kwargs,
-                    reverse=True,
-                ):
-                    yield {"frame_index": frame_idx, "outputs": outputs}
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                # Forward propagation
+                if propagation_direction in ["both", "forward"]:
+                    for frame_idx, outputs in self.model.propagate_in_video(
+                        **propagate_kwargs,
+                        reverse=False,
+                    ):
+                        yield {"frame_index": frame_idx, "outputs": outputs}
+                # Backward propagation
+                if propagation_direction in ["both", "backward"]:
+                    for frame_idx, outputs in self.model.propagate_in_video(
+                        **propagate_kwargs,
+                        reverse=True,
+                    ):
+                        yield {"frame_index": frame_idx, "outputs": outputs}
         finally:
             logger.info(f"propagation ended in session {session_id}")
 

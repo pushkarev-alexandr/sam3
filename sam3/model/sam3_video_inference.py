@@ -399,6 +399,11 @@ class Sam3VideoInference(Sam3VideoBase):
         inference_state["tracker_inference_states"] = tracker_states_local_new
         inference_state["tracker_metadata"] = tracker_metadata_new
         # use a dummy string in "previous_stages_out" to indicate this frame has outputs
+        if "previous_stages_out" not in inference_state:
+            raise RuntimeError(
+                "Inference session was closed or reset during propagation. "
+                "Keep the session alive until propagation finishes."
+            )
         inference_state["previous_stages_out"][frame_idx] = "_THIS_FRAME_HAS_OUTPUTS_"
 
         if self.rank == 0:
